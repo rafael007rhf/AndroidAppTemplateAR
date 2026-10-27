@@ -1,158 +1,118 @@
 package com.ifpr.androidapptemplatear.ui
 
-import androidx.fragment.app.Fragment
-import com.ifpr.androidapptemplatear.R
-import android.content.Context
+import android.Manifest
 import android.content.pm.PackageManager
-import android.net.Uri
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
-import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.ar.core.Config
-import com.ifpr.androidapptemplatear.databinding.FragmentCameraBinding
+import com.ifpr.androidapptemplatear.R
 import io.github.sceneview.ar.ArSceneView
 import io.github.sceneview.ar.node.ArModelNode
 import io.github.sceneview.ar.node.PlacementMode
 import io.github.sceneview.math.Position
-import okio.IOException
-import java.io.File
 
 class CameraFragment : Fragment() {
-
     private lateinit var sceneView: ArSceneView
-    private lateinit var modelNode: ArModelNode
-    private lateinit var placeButton: ExtendedFloatingActionButton
+    private var modelNode: ArModelNode? = null
+    private lateinit var placeButton: Button
+    private lateinit var collectButton: Button
+    private lateinit var scoreView: TextView
+    private var currentModel = "cristal_azul.glb"
+    private var score = 0
+    private var placed = false
+    private var music: MediaPlayer? = null
 
-    private lateinit var sharedViewModel: SharedModelViewModel
-
-    private val CAMERA_PERMISSION_CODE = 1001
-
-    private var currentModelFile: String = "neutrofilo.glb"
-
-    private var _binding: FragmentCameraBinding? = null
-
-    // This property is only valid between onCreateView and
-    // onDestroyView.
-    private val binding get() = _binding!!
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        super.onCreate(savedInstanceState)
-        sharedViewModel = ViewModelProvider(requireActivity())[SharedModelViewModel::class.java]
-        sharedViewModel.selectedModel.observe(viewLifecycleOwner) { path ->
-            loadModel(path)
-        }
-
-        val view = inflater.inflate(R.layout.fragment_camera, container, false)
-
-        sceneView = view.findViewById<ArSceneView?>(R.id.sceneView).apply {
-            lightEstimationMode = Config.LightEstimationMode.DISABLED
-        }
-
-        placeButton = view.findViewById(R.id.place)
-
-        placeButton.setOnClickListener {
-            placeModel()
-        }
-
-        return view
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
-    }
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
+        inflater.inflate(R.layout.fragment_camera, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        checkCameraPermission()
-    }
-
-    private fun placeModel() {
-        modelNode.anchor()
-        modelNode.isEditable = true
-        modelNode.isScaleEditable = false
-
-        sceneView.planeRenderer.isVisible = false
-    }
-
-    private fun checkCameraPermission() {
-        if (ContextCompat.checkSelfPermission(requireContext(), android.Manifest.permission.CAMERA)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(
-                requireActivity(),
-                arrayOf(android.Manifest.permission.CAMERA),
-                CAMERA_PERMISSION_CODE
-            )
-        } else {
-            initAR()
+        sceneView = view.findViewById<ArSceneView>(R.id.sceneView).apply {
+            lightEstimationMode = Config.LightEstimationMode.DISABLED
         }
+        placeButton = view.findViewById(R.id.place)
+        collectButton = view.findViewById(R.id.collect)
+        scoreView = view.findViewById(R.id.score)
+        score = savedInstanceState?.getInt("score") ?: 0
+        scoreView.text = "Pontos: $score"
+        placeButton.isEnabled = false
+        collectButton.isEnabled = false
+        placeButton.setOnClickListener {
+            val node = modelNode ?: return@setOnClickListener
+            node.anchor()
+            node.isEditable = true
+            node.isScaleEditable = false
+            placed = true
+            placeButton.isEnabled = false
+            collectButton.isEnabled = true
+            sceneView.planeRenderer.isVisible = false
+        }
+        collectButton.setOnClickListener {
+            if (placed) {
+                score += 10
+                scoreView.text = "Pontos: $score"
+                Toast.makeText(requireContext(), "Cristal coletado! +10 pontos", Toast.LENGTH_SHORT).show()
+                loadModel(currentModel)
+            }
+        }
+        val vm = ViewModelProvider(requireActivity())[SharedModelViewModel::class.java]
+        vm.selectedModel.observe(viewLifecycleOwner) { file ->
+            currentModel = file
+            if (hasCameraPermission()) loadModel(file)
+        }
+        if (hasCameraPermission()) loadModel(currentModel)
+        else requestPermissions(arrayOf(Manifest.permission.CAMERA), 1001)
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
+    private fun hasCameraPermission() = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == CAMERA_PERMISSION_CODE && grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        ) {
-            initAR()
-        } else {
-            Toast.makeText(requireContext(), "Permissão de câmera negada", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun initAR() {
-        loadModel(currentModelFile)
+        if (requestCode == 1001 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) loadModel(currentModel)
+        else if (requestCode == 1001) Toast.makeText(requireContext(), "Permita o acesso à câmera para jogar.", Toast.LENGTH_LONG).show()
     }
 
     private fun loadModel(fileName: String) {
-        try {
-            sceneView.removeChild(modelNode)
-        } catch (e: Exception) {
-
-        }
-
-        modelNode = ArModelNode(sceneView.engine, PlacementMode.INSTANT).apply {
-            loadModelGlbAsync(
-                glbFileLocation = getFilePath(requireContext(),fileName),
-                centerOrigin = Position(0f,0f,1f),
-
-            ) {
-                sceneView.planeRenderer.isVisible = true
+        modelNode?.let { sceneView.removeChild(it) }
+        placed = false
+        placeButton.isEnabled = false
+        collectButton.isEnabled = false
+        val node = ArModelNode(sceneView.engine, PlacementMode.INSTANT).apply {
+            loadModelGlbAsync(glbFileLocation = fileName, centerOrigin = Position(0f, 0f, 0f)) {
+                if (isAdded && modelNode === this) {
+                    sceneView.planeRenderer.isVisible = true
+                    placeButton.isEnabled = true
+                }
             }
-            // Permitir interação com o modelo
             isEditable = true
             isScaleEditable = false
-
         }
-
-        sceneView.addChild(modelNode)
+        modelNode = node
+        sceneView.addChild(node)
     }
 
-    private fun getFilePath(context: Context?, fileName: String): String {
-        try {
-            context?.assets?.open(fileName)?.close() // Tenta abrir o arquivo dos assets
-            return fileName // Se abrir sem erro, presume-se que está nos assets
-        } catch (e: IOException) {
-            // Arquivo não encontrado nos assets, agora vamos procurar no filesDir
-            val internalFile = File(context?.filesDir, fileName)
-            if (internalFile.exists()) {
-                return  Uri.fromFile(internalFile).toString()
-            } else {
-                return "Arquivo não encontrado em assets nem em filesDir: $fileName"
-            }
-        }
+    override fun onResume() {
+        super.onResume()
+        music = MediaPlayer.create(requireContext(), R.raw.ambiente)?.apply { isLooping = true; setVolume(0.25f, 0.25f); start() }
+    }
+
+    override fun onPause() {
+        music?.release()
+        music = null
+        super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("score", score)
+        super.onSaveInstanceState(outState)
     }
 }

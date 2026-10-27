@@ -60,7 +60,7 @@ class ChangeObjectFragment : Fragment() {
             .assets
             .list("")
             ?.filter { arquivo ->
-                arquivo.endsWith(".glb", ignoreCase = true)
+                arquivo.startsWith("cristal_") && arquivo.endsWith(".glb", ignoreCase = true)
             }
             ?.sorted()
             ?: emptyList()
@@ -89,7 +89,7 @@ class ChangeObjectFragment : Fragment() {
 
         val titulo = TextView(requireContext()).apply {
 
-            text = "Modelos 3D"
+            text = "Escolha um cristal"
 
             setTextSize(
                 TypedValue.COMPLEX_UNIT_SP,
